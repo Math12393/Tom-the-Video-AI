@@ -28,57 +28,45 @@
   </div>
 
   <script>
-    const API_KEY = "sk-4dea413565fb4e3faacc29a5324dfc66"; // <-- Paste your Veo3API key here
+    // Replace this with your deployed Supabase Edge Function URL
+    const EDGE_FUNCTION_URL = "https://cbqrmfgnluejsicjqpma.functions.supabase.co/generate_video";
 
-    async function generateVideo(prompt) {
-      document.getElementById("status").textContent = "Submitting request...";
-      try {
-        // 1️⃣ Submit video request
-        const res = await fetch("https://veo3api.com/generate", {
-          method: "POST",
+    async function submitPrompt(prompt) {
+      // Call your Edge Function
+      const res = await fetch(EDGE_FUNCTION_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt })
+      });
+      const data = await res.json();
+      return data.task_id; // Receive the task_id immediately
+    }
+
+    async function pollVeo(taskId) {
+      // Poll Veo3API until the video is ready
+      const VEO_API_KEY = "sk-4dea413565fb4e3faacc29a5324dfc66"; // Keep private! Edge Function hides it for production
+
+      async function poll() {
+        const statusRes = await fetch(`https://veo3api.com/status/${taskId}`, {
           headers: {
-            "Authorization": `Bearer ${API_KEY}`,
+            "Authorization": `Bearer ${VEO_API_KEY}`,
             "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            prompt,
-            model: "veo3-fast",
-            duration: 5,
-            watermark: "veo"
-          })
-        });
-
-        const data = await res.json();
-        const taskId = data.data.task_id;
-
-        // 2️⃣ Poll for video completion
-        async function poll() {
-          const statusRes = await fetch(`https://veo3api.com/status/${taskId}`, {
-            headers: {
-              "Authorization": `Bearer ${API_KEY}`,
-              "Content-Type": "application/json"
-            }
-          });
-
-          const statusData = await statusRes.json();
-
-          if (statusData.data.status === "completed") {
-            document.getElementById("status").textContent = "Video ready!";
-            return statusData.data.video_url;
-          } else if (statusData.data.status === "failed") {
-            throw new Error("Video generation failed");
-          } else {
-            document.getElementById("status").textContent = "Generating video...";
-            await new Promise(r => setTimeout(r, 3000));
-            return poll();
           }
-        }
+        });
+        const statusData = await statusRes.json();
 
-        return await poll();
-      } catch (err) {
-        document.getElementById("status").textContent = err.message;
-        console.error(err);
+        if (statusData.data.status === "completed") {
+          return statusData.data.video_url;
+        } else if (statusData.data.status === "failed") {
+          throw new Error("Video generation failed");
+        } else {
+          document.getElementById("status").textContent = "Generating video...";
+          await new Promise(r => setTimeout(r, 3000));
+          return poll();
+        }
       }
+
+      return await poll();
     }
 
     function addVideoToHistory(prompt, url) {
@@ -93,16 +81,23 @@
     }
 
     document.getElementById("generate").addEventListener("click", async () => {
-      const prompt = document.getElementById("prompt").value;
+      const prompt = document.getElementById("prompt").value.trim();
       if (!prompt) {
         alert("Please enter a prompt!");
         return;
       }
 
-      const videoUrl = await generateVideo(prompt);
-      if (videoUrl) {
+      document.getElementById("status").textContent = "Submitting prompt...";
+      try {
+        const taskId = await submitPrompt(prompt);
+        document.getElementById("status").textContent = "Prompt submitted! Waiting for video...";
+        const videoUrl = await pollVeo(taskId);
+        document.getElementById("status").textContent = "Video ready!";
         document.getElementById("result").src = videoUrl;
         addVideoToHistory(prompt, videoUrl);
+      } catch (err) {
+        console.error(err);
+        document.getElementById("status").textContent = err.message;
       }
     });
   </script>
